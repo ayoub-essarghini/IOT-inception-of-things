@@ -14,3 +14,8 @@ a small project to learn k3s
 
 
 > Bonus: deploy gitlab and sync it with argo CD
+
+
+
+aes-sarg (part1 + part2)
+amiftah (part3 + bonus)
