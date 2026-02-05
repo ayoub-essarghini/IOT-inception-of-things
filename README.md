@@ -10,6 +10,7 @@ a small project to learn k3s
 
 # part 3 + bonus
 - Argo CD (sync everything with argo CD)
+- deploy k3s with k3d
 
 
 > Bonus: deploy gitlab and sync it with argo CD
