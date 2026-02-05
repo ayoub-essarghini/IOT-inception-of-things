@@ -1,4 +1,4 @@
-# IOT-inception-of-things-
+# inception-of-things
 a small project to learn k3s
 
 # part 1
