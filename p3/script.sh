@@ -17,7 +17,6 @@ rm kubectl
 # create k3d cluster
 k3d cluster create dev-cluster --agents 2
 
-
 #install helm
 kubectl create namespace argocd
 kubectl apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
@@ -56,17 +55,37 @@ argocd login localhost:8080 --insecure --username admin --password "$(kubectl -n
 
 sleep 3
 
+# create repository secret for argocd using SSH key (no SSH agent needed)
+if [ ! -f "$HOME/.ssh/id_ed25519" ]; then
+	echo "Missing SSH key: $HOME/.ssh/id_ed25519"
+	exit 1
+fi
+
+kubectl create secret generic argocd-repo-ssh \
+	-n argocd \
+	--from-literal=type=git \
+	--from-literal=url=git@github.com:0xk1/Inception-of-things.git \
+	--from-file=sshPrivateKey=$HOME/.ssh/id_ed25519 \
+	--dry-run=client -o yaml | kubectl apply -f - || true
+
+# label the secret so ArgoCD recognizes it
+kubectl label secret argocd-repo-ssh -n argocd argocd.argoproj.io/secret-type=repository --overwrite || true
+
+sleep 2
+
 kubectl create ns dev 
 
-# create argocd app
+# create argocd app from deployed repository
 argocd app create playground \
-  --repo https://github.com/argoproj/argocd-example-apps.git \
-  --path guestbook \
-  --dest-server https://kubernetes.default.svc \
-  --dest-namespace dev
-
+  --repo 'git@github.com:0xk1/Inception-of-things.git' \
+  --path 'p3/app' \
+  --dest-server 'https://kubernetes.default.svc' \
+  --dest-namespace 'dev' \
+	--revision part3 \
+	--sync-policy automated \
+	--self-heal \
+	--auto-prune
 sleep 3
 
 # sync the app
-argocd app sync playground
-
+argocd app sync playground 

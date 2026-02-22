@@ -17,9 +17,9 @@ spec:
     spec:
       containers:
       - name: playground
-        image: wil42/playground:v2
+        image: wil42/playground:v1
         ports:
-        - containerPort: 8080
+        - containerPort: 8888
         resources:
           requests:
             memory: "64Mi"
