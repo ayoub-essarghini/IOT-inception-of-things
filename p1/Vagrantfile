@@ -1,14 +1,20 @@
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/jammy64"
 
+  if Vagrant.has_plugin?("vagrant-vbguest")
+    config.vbguest.auto_update = false
+  end
+
   # ---------------- SERVER ----------------
   config.vm.define "aes-sargS" do |server|
     server.vm.hostname = "aes-sargS"
     server.vm.network "private_network", ip: "192.168.56.110"
+    server.vm.network "forwarded_port", guest: 22, host: 2210, id: "ssh", auto_correct: true
 
     server.vm.provider "virtualbox" do |v|
-      v.memory = 1024
-      v.cpus = 1
+      v.memory = 2048
+      v.cpus = 2
+      v.customize ["modifyvm", :id, "--paravirtprovider", "none"]
     end
 
     server.vm.provision "shell", path: "scripts/server.sh"
@@ -18,10 +24,20 @@ Vagrant.configure("2") do |config|
   config.vm.define "aes-sargSW" do |worker|
     worker.vm.hostname = "aes-sargSW"
     worker.vm.network "private_network", ip: "192.168.56.111"
+    worker.vm.network "forwarded_port", guest: 22, host: 2211, id: "ssh", auto_correct: true
+
+    worker.trigger.before :up do |trigger|
+      trigger.name = "Ensure aes-sargS is running"
+      trigger.info = "Ensuring k3s server VM is running before starting worker"
+      trigger.run = {
+        inline: "bash scripts/ensure-server-running.sh"
+      }
+    end
 
     worker.vm.provider "virtualbox" do |v|
-      v.memory = 1024
+      v.memory = 1536
       v.cpus = 1
+      v.customize ["modifyvm", :id, "--paravirtprovider", "none"]
     end
 
     worker.vm.provision "shell", path: "scripts/worker.sh"
