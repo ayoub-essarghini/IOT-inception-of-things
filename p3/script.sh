@@ -76,3 +76,11 @@ sleep 3
 
 # sync app
 argocd app sync playground
+
+echo "Waiting for playground application pods to fully deploy..."
+kubectl wait --for=condition=Available deployment/playground -n dev --timeout=120s
+
+echo "Exposing playground deployment directly to local port 8888..."
+kubectl -n dev port-forward deployment/playground 8888:8888 --address 0.0.0.0 &
+
+sleep 3
