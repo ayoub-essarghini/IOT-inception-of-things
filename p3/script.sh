@@ -17,7 +17,7 @@ sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 rm kubectl
 
 # create k3d cluster
-k3d cluster create dev-cluster --agents 2 -p "80:80@loadbalancer" -p "443:443@loadbalancer"
+k3d cluster create dev-cluster --agents 2 -p "80:80@loadbalancer" -p "443:443@loadbalancer" -p "8888:8888@loadbalancer"
 
 # create namespaces
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
@@ -79,8 +79,3 @@ argocd app sync playground
 
 echo "Waiting for playground application pods to fully deploy..."
 kubectl wait --for=condition=Available deployment/playground -n dev --timeout=120s
-
-echo "Exposing playground deployment directly to local port 8888..."
-kubectl -n dev port-forward deployment/playground 8888:8888 --address 0.0.0.0 &
-
-sleep 3
