@@ -17,7 +17,14 @@ sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 rm kubectl
 
 # create k3d cluster
-k3d cluster create dev-cluster --agents 2 -p "80:80@loadbalancer" -p "443:443@loadbalancer" -p "8888:8888@loadbalancer"
+if k3d cluster list dev-cluster >/dev/null 2>&1; then
+    echo "Cluster 'dev-cluster' already exists. Skipping creation and proceeding..."
+else
+    echo "Cluster 'dev-cluster' not found. Initializing new cluster..."
+    k3d cluster create dev-cluster --agents 2 \
+        -p "80:80@loadbalancer" \
+        -p "443:443@loadbalancer"
+fi
 
 # create namespaces
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
@@ -28,11 +35,11 @@ kubectl apply -n argocd --server-side --force-conflicts -f https://raw.githubuse
 
 # wait for argocd
 echo "Waiting for Argo CD pods to be Ready..."
-kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
+kubectl wait --for=condition=Ready pods --all -n argocd --timeout=600s
 echo "Argo CD pods are Ready."
 
 # port forward argocd-server
-kubectl -n argocd port-forward svc/argocd-server --address 0.0.0.0 8080:443 &
+kubectl -n argocd port-forward svc/argocd-server --address 0.0.0.0 8080:443 >/dev/null 2>&1 &
 sleep 5
 
 # install argocd cli
@@ -72,10 +79,17 @@ argocd app create playground \
   --auto-prune \
   --upsert
 
-sleep 3
 
-# sync app
-argocd app sync playground
+echo "Waiting for Argo CD automated sync to declare the deployment manifest..."
+while ! kubectl get deployment/playground -n dev >/dev/null 2>&1; do
+    sleep 2
+done
+
+sudo kill -9 $(sudo lsof -t -i:8888) 2>/dev/null
+
+echo "Opening permanent service tunnel to port 8888..."
+kubectl -n dev port-forward svc/playground 8888:8888 --address 0.0.0.0 >/dev/null 2>&1 &
+
 
 echo "Waiting for playground application pods to fully deploy..."
 kubectl wait --for=condition=Available deployment/playground -n dev --timeout=120s
