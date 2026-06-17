@@ -66,7 +66,7 @@ argocd app create playground \
   --path 'p3/app' \
   --dest-server 'https://kubernetes.default.svc' \
   --dest-namespace 'dev' \
-  --revision part3 \
+  --revision main \
   --sync-policy automated \
   --self-heal \
   --auto-prune \
