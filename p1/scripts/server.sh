@@ -1,8 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-sudo apt-get update
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl
+command -v curl >/dev/null 2>&1 || {
+  sudo apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl
+}
 
 sudo rm -f /vagrant/token
 

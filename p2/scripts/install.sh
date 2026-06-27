@@ -2,8 +2,10 @@
 
 set -e
 
-apt update -y
-apt install -y curl
+command -v curl >/dev/null 2>&1 || {
+  apt update -y
+  apt install -y curl
+}
 
 # Install k3s server
 curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --node-ip=192.168.56.110" sh -
