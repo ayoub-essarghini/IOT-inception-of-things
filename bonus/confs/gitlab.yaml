@@ -19,6 +19,8 @@ metadata:
     app: gitlab
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: gitlab
@@ -50,7 +52,13 @@ spec:
             gitlab_rails['gitlab_shell_ssh_port'] = 30222
             gitlab_rails['registry_enabled'] = false
             prometheus_monitoring['enable'] = false
-            sidekiq['max_concurrency'] = 5
+            # Trim memory so GitLab fits in a constrained host without being
+            # OOM-killed: run Puma single-process (no cluster workers) and keep
+            # Sidekiq/Postgres small. This drops idle RSS from ~10GB to ~3GB.
+            puma['worker_processes'] = 0
+            sidekiq['max_concurrency'] = 3
+            postgresql['shared_buffers'] = "256MB"
+            postgresql['max_worker_processes'] = 4
         readinessProbe:
           httpGet:
             path: /users/sign_in

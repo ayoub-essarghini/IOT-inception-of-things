@@ -9,7 +9,10 @@ GITLAB_NAMESPACE="gitlab"
 ARGOCD_NAMESPACE="argocd"
 DEV_NAMESPACE="dev"
 CLUSTER_NAME="dev-cluster"
-GITLAB_ROOT_PASSWORD="${GITLAB_ROOT_PASSWORD:-rootroot42}"
+# GitLab CE rejects weak/forbidden passwords (e.g. anything containing the
+# username "root"), which makes gitlab-ctl reconfigure fail. Use a strong,
+# word-free default so the initial admin account is created successfully.
+GITLAB_ROOT_PASSWORD="${GITLAB_ROOT_PASSWORD:-Xk7q-Mp42-Zv9t-Rn83}"
 GITLAB_PROJECT="playground"
 GITLAB_TOKEN_NAME="iot-argocd-token"
 GITLAB_TOKEN="${GITLAB_TOKEN:-iot-root-token-424242}"
@@ -139,43 +142,87 @@ seed_gitlab_project() {
     user = User.find_by_username('root')
     project = Project.find_by_full_path('root/${GITLAB_PROJECT}')
     unless project
-      result = Projects::CreateService.new(user, {
+      Projects::CreateService.new(user, {
         name: '${GITLAB_PROJECT}',
         path: '${GITLAB_PROJECT}',
         namespace_id: user.namespace.id,
         visibility_level: Gitlab::VisibilityLevel::PRIVATE
       }).execute
-      project = result.respond_to?(:payload) ? result.payload[:project] : result[:project]
+      # Projects::CreateService#execute returns different shapes across GitLab
+      # versions (ServiceResponse vs. the Project itself), so re-fetch the
+      # canonical record instead of trusting the return value.
+      project = Project.find_by_full_path('root/${GITLAB_PROJECT}')
     end
-    token = user.personal_access_tokens.find_by(name: '${GITLAB_TOKEN_NAME}')
-    unless token
-      token = PersonalAccessToken.new(
-        user: user,
-        name: '${GITLAB_TOKEN_NAME}',
-        scopes: ['api', 'read_repository', 'write_repository'],
-        expires_at: 1.year.from_now
-      )
-      token.set_token('${GITLAB_TOKEN}')
-      token.save!
-    end
+    raise 'Project root/${GITLAB_PROJECT} was not created' unless project
+    # Always (re)create the token so its plaintext matches GITLAB_TOKEN. A token
+    # left over from a previous run is found by name but its digest will not match
+    # our known value, which breaks the HTTP push and the Argo CD repo secret.
+    user.personal_access_tokens.where(name: '${GITLAB_TOKEN_NAME}').delete_all
+    token = PersonalAccessToken.new(
+      user: user,
+      name: '${GITLAB_TOKEN_NAME}',
+      scopes: ['api', 'read_repository', 'write_repository'],
+      expires_at: 1.year.from_now
+    )
+    token.set_token('${GITLAB_TOKEN}')
+    token.save!
     puts project.http_url_to_repo
   "
 }
 
 push_app_to_gitlab() {
+  local remote="http://root:${GITLAB_TOKEN}@localhost:${GITLAB_WEB_PORT}/root/${GITLAB_PROJECT}.git"
+
   rm -rf "$WORK_DIR"
-  mkdir -p "$WORK_DIR"
 
-  cp "$ROOT_DIR/p3/app/"*.yaml "$WORK_DIR/"
+  # Clone the existing repo so re-runs add a fast-forward commit on top of the
+  # current history. GitLab auto-protects the default branch and rejects force
+  # pushes, but the project owner (root) may push non-force commits. A fresh
+  # 'git init' would create an unrelated history and be rejected on re-runs, so
+  # we only init when the remote is still empty.
+  if git clone "$remote" "$WORK_DIR" 2>/dev/null && \
+     git -C "$WORK_DIR" rev-parse HEAD >/dev/null 2>&1; then
+    git -C "$WORK_DIR" checkout -B main
+  else
+    rm -rf "$WORK_DIR"
+    mkdir -p "$WORK_DIR"
+    git -C "$WORK_DIR" init -b main
+    git -C "$WORK_DIR" remote add origin "$remote"
+  fi
 
-  git -C "$WORK_DIR" init -b main
   git -C "$WORK_DIR" config user.email "iot@example.local"
   git -C "$WORK_DIR" config user.name "Inception of Things"
-  git -C "$WORK_DIR" add .
-  git -C "$WORK_DIR" commit -m "Import part 3 playground app"
 
-  git -C "$WORK_DIR" remote add origin "http://root:${GITLAB_TOKEN}@localhost:${GITLAB_WEB_PORT}/root/${GITLAB_PROJECT}.git"
-  git -C "$WORK_DIR" push -u origin main --force
+  cp "$ROOT_DIR/p3/app/"*.yaml "$WORK_DIR/"
+  git -C "$WORK_DIR" add .
+  if ! git -C "$WORK_DIR" diff --cached --quiet; then
+    git -C "$WORK_DIR" commit -m "Import part 3 playground app"
+  fi
+  git -C "$WORK_DIR" push -u origin main
+
+  # The default branch is protected by GitLab's default-branch policy (enforced
+  # even without an explicit rule), which blocks every later push including the
+  # manual v1->v2 demo. Replace it with a permissive rule that allows developers
+  # to push and force-push so the repository can be updated via plain git.
+  unprotect_default_branch
+}
+
+unprotect_default_branch() {
+  local pod
+  pod="$(kubectl get pod -n "$GITLAB_NAMESPACE" -l app=gitlab -o jsonpath='{.items[0].metadata.name}')"
+  kubectl exec -n "$GITLAB_NAMESPACE" "$pod" -- gitlab-rails runner "
+    project = Project.find_by_full_path('root/${GITLAB_PROJECT}')
+    root = User.find_by_username('root')
+    if project && root
+      project.protected_branches.where(name: 'main').destroy_all
+      ProtectedBranches::CreateService.new(project, root, {
+        name: 'main',
+        allow_force_push: true,
+        push_access_levels_attributes: [{ access_level: Gitlab::Access::DEVELOPER }],
+        merge_access_levels_attributes: [{ access_level: Gitlab::Access::DEVELOPER }]
+      }).execute
+    end
+  "
 }
 
 configure_argocd_app() {
@@ -208,8 +255,15 @@ configure_argocd_app() {
 }
 
 open_playground_tunnel() {
-  start_port_forward "$DEV_NAMESPACE" playground "$PLAYGROUND_PORT" 8888
   kubectl wait --for=condition=Available deployment/playground -n "$DEV_NAMESPACE" --timeout=180s
+  refresh_playground_port_forward
+}
+
+refresh_playground_port_forward() {
+  pkill -f "kubectl.*port-forward.*${PLAYGROUND_PORT}:8888" 2>/dev/null || true
+  kubectl -n "$DEV_NAMESPACE" port-forward svc/playground \
+    "${PLAYGROUND_PORT}:8888" --address 0.0.0.0 >/tmp/iot-playground-${PLAYGROUND_PORT}.log 2>&1 &
+  sleep 2
 }
 
 show_version_change_hint() {
@@ -238,11 +292,13 @@ To demonstrate the Part 3 version change with local GitLab:
   git commit -m "Update playground version"
   git push
   argocd app wait playground --health --sync --timeout 300
+  # Restart the port-forward after pod recreation:
+  bash bonus/scripts/setup.sh --refresh-port-forward
 
 EOF
 }
 
-main() {
+run_full_setup() {
   install_dependencies
   ensure_base_cluster
   ensure_argocd
@@ -252,6 +308,37 @@ main() {
   configure_argocd_app
   open_playground_tunnel
   show_version_change_hint
+}
+
+usage() {
+  cat <<EOF
+Usage: bash bonus/scripts/setup.sh [command]
+
+Commands:
+  (no argument)            Run the full bonus setup pipeline.
+  --refresh-port-forward   Restart the playground port-forward after a pod
+                           recreation (e.g. an Argo CD version sync).
+  -h, --help               Show this help message.
+EOF
+}
+
+main() {
+  case "${1:-}" in
+    "")
+      run_full_setup
+      ;;
+    --refresh-port-forward)
+      refresh_playground_port_forward
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
 }
 
 main "$@"

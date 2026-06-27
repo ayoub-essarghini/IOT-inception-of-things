@@ -28,6 +28,13 @@ The script prints the GitLab URL, credentials, Argo CD URL, application URL, and
 the manual commands needed to update the playground deployment version through
 the local GitLab repository.
 
+After a version change is synced by Argo CD, the playground pod is recreated and
+the old port-forward dies. Restart it without re-running the whole pipeline:
+
+```bash
+bash bonus/scripts/setup.sh --refresh-port-forward
+```
+
 
 - GitLab runs locally in the `gitlab` namespace.
 - A local repository is created in GitLab.
