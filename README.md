@@ -178,7 +178,3 @@ This project follows the principles of the 42 curriculum and is intended for edu
 The Inception of Things project is an introduction to modern DevOps practices. It helps students understand how applications are packaged, deployed, and orchestrated in real-world cloud and infrastructure environments.
 
 This project is an essential step toward understanding modern software deployment, container orchestration, and distributed system management.
-
----
-
-If you want, I can also write a more formal 42-style README, a shorter GitHub-ready version, or a more polished project description specifically for your repo page.
